@@ -5,7 +5,7 @@ import { UpdateUserDto } from '../src/user/dtos/update-user.dto';
 import { SigninDto } from '../src/auth/dtos/signin.dto';
 import { bootstrap } from '../src/app-bootstrap';
 
-describe.skip('Profile testing', () => {
+describe('Profile testing', () => {
   let app: INestApplication;
   let server: any;
   const existingUser = {
@@ -87,7 +87,7 @@ describe.skip('Profile testing', () => {
       expect(res.statusCode).toEqual(401);
     });
   });
-  describe('[ENDPOINT] /api/profiles/:username/favorite', () => {
+  describe('[ENDPOINT] /api/profiles/:username/follow', () => {
     it('POST after following, the profile response contains following:true', async () => {
       const user = generateNewUser();
       const authorization = await signin(user);

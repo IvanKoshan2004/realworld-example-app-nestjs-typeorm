@@ -79,7 +79,7 @@ describe('Article testing', () => {
     existingArticleSlug = res.body.article.slug;
   });
 
-  describe.only('[ENDPOINT]: /api/articles/:slug', () => {
+  describe('[ENDPOINT]: /api/articles/:slug', () => {
     const updateArticleDto = {
       article: {
         body: 'new_body',
@@ -108,7 +108,9 @@ describe('Article testing', () => {
       await request(server)
         .post(`/api/articles/${slug}/favorite`)
         .set('Authorization', authorization);
-      const res2 = await request(server).get(`/api/articles/${slug}`);
+      const res2 = await request(server)
+        .get(`/api/articles/${slug}`)
+        .set('Authorization', authorization);
       const articleRes2 = res2.body.article as ArticleResponseObject;
       expect(articleRes2.favorited).toEqual(true);
     });
@@ -126,8 +128,8 @@ describe('Article testing', () => {
         .set('Authorization', authorization)
         .send(updateArticleDto);
 
-      const articleRes2 = res1.body.article;
-      expect(res2.statusCode).toEqual(201);
+      const articleRes2 = res2.body.article;
+      expect(res2.statusCode).toEqual(200);
       expect(articleRes2.body).toEqual('new_body');
       expect(articleRes2.description).toEqual('new_description');
       expect(articleRes2.title).toEqual('new_title');
@@ -247,8 +249,24 @@ describe('Article testing', () => {
     });
     it('GET /?offset={number} should return articles with offset specified by number', async () => {
       const offset = 1;
-      const res = await request(server).get(`/api/articles`);
-      const res1 = await request(server).get(`/api/articles/?offset=${offset}`);
+      const prefix = randomBytes(5).toString('base64');
+      const newUser = {
+        user: {
+          email: prefix + 'email@gmail.com',
+          password: 'password',
+          username: prefix + 'username',
+        },
+      };
+      const authorization = await signin(newUser);
+      await createArticleRequest(generateCreateArticleDto(), authorization);
+      await createArticleRequest(generateCreateArticleDto(), authorization);
+      await createArticleRequest(generateCreateArticleDto(), authorization);
+      const res = await request(server).get(
+        `/api/articles/?author=${newUser.user.username}`,
+      );
+      const res1 = await request(server).get(
+        `/api/articles/?offset=${offset}&author=${newUser.user.username}`,
+      );
       const articlesRes = res.body.articles as ArticleResponseObject[];
       const articlesRes1 = res1.body.articles as ArticleResponseObject[];
       expect(articlesRes[offset].slug).toEqual(articlesRes1[0].slug);
@@ -282,14 +300,24 @@ describe('Article testing', () => {
       const newArticle = generateCreateArticleDto();
       await createArticleRequest(newArticle, authorization);
       const authorization2 = await login(existingUser2);
+      await request(server)
+        .post(`/api/profiles/${existingUser1.user.username}/follow`)
+        .set('Authorization', authorization2);
       const res = await request(server)
         .get('/api/articles/feed')
         .set('Authorization', authorization2);
       const articles = res.body.articles as ArticleResponseObject[];
-      expect(articles).toHaveLength(1);
       articles.forEach((article) => {
         expect(article.author.following).toEqual(true);
       });
+    });
+    it('GET should return empty articles array if there are no articles from followed authors', async () => {
+      const authorization = await login(existingUser1);
+      const res = await request(server)
+        .get('/api/articles/feed')
+        .set('Authorization', authorization);
+      const articles = res.body.articles as ArticleResponseObject[];
+      expect(articles).toHaveLength(0);
     });
     it('GET should return 401 if user is unauthorized', async () => {
       const res = await request(server).get('/api/articles/feed');
@@ -417,7 +445,7 @@ describe('Article testing', () => {
     it("DELETE should return 404 if comment doesn't exist and user is authorized", async () => {
       const authorization = await login(existingUser1);
       const req = await request(server)
-        .delete(`/api/articles/${existingArticleSlug}/comments/1`)
+        .delete(`/api/articles/${existingArticleSlug}/comments/0`)
         .set('Authorization', authorization);
       expect(req.statusCode).toEqual(404);
     });

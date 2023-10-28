@@ -3,7 +3,7 @@ import * as request from 'supertest';
 import { randomBytes } from 'crypto';
 import { SigninDto } from '../src/auth/dtos/signin.dto';
 import { bootstrap } from '../src/app-bootstrap';
-describe.skip('Auth testing', () => {
+describe('Auth testing', () => {
   let app: INestApplication;
   let server: any;
   const existingUser = {
