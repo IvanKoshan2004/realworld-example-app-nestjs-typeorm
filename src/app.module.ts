@@ -31,13 +31,17 @@ import { ValidJwtEntity } from './validated-jwt/entity/valid-jwt.entity';
       ],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
+        let database = configService.get('database.name');
+        if (process.env.APPLICATION_ENV == 'test') {
+          database = configService.get('database.testName');
+        }
         return {
           type: 'mysql',
           host: configService.get('database.host'),
           port: configService.get('database.port'),
           username: configService.get('database.username'),
           password: configService.get('database.password'),
-          database: configService.get('database.name'),
+          database: database,
           entities: [
             UserEntity,
             ArticleEntity,
@@ -48,7 +52,6 @@ import { ValidJwtEntity } from './validated-jwt/entity/valid-jwt.entity';
             ValidJwtEntity,
           ],
           synchronize: true,
-          // logging: true,
         };
       },
     }),

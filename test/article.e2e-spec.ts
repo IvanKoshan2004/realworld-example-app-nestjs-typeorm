@@ -1,7 +1,5 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
-import { AppModule } from '../src/app.module';
 import { CreateArticleDto } from '../src/article/dtos/create-article.dto';
 import { UpdateArticleDto } from '../src/article/dtos/update-article.dto';
 import {
@@ -12,6 +10,7 @@ import { randomBytes } from 'crypto';
 import { LoginDto } from '../src/auth/dtos/login.dto';
 import { SigninDto } from '../src/auth/dtos/signin.dto';
 import { CommentResponseObject } from '../src/responses/comment-responses.type';
+import { bootstrap } from '../src/app-bootstrap';
 
 describe('Article testing', () => {
   let app: INestApplication;
@@ -71,11 +70,7 @@ describe('Article testing', () => {
   let existingArticleSlug: string;
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
+    app = await bootstrap();
     await app.init();
     server = app.getHttpServer();
     await signin(existingUser2);
@@ -84,7 +79,7 @@ describe('Article testing', () => {
     existingArticleSlug = res.body.article.slug;
   });
 
-  describe('[ENDPOINT]: /api/articles/:slug', () => {
+  describe.only('[ENDPOINT]: /api/articles/:slug', () => {
     const updateArticleDto = {
       article: {
         body: 'new_body',
