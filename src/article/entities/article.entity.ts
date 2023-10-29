@@ -21,7 +21,7 @@ export class ArticleEntity {
   @Column({ unique: true })
   slug: string;
 
-  @Column({ unique: true })
+  @Column()
   title: string;
 
   @Column({ default: '' })

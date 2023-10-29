@@ -1,12 +1,11 @@
 import {
-  BadRequestException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ArticleEntity } from './entities/article.entity';
-import { DeepPartial, Repository } from 'typeorm';
+import { DeepPartial, EntityNotFoundError, Repository } from 'typeorm';
 import { CreateArticleDto } from './dtos/create-article.dto';
 import { GetArticlesQueryDto } from './dtos/get-articles-query.dto';
 import { UpdateArticleDto } from './dtos/update-article.dto';
@@ -58,31 +57,32 @@ export class ArticleService {
       updatedAt: createdAt,
       author: { id: currentUserId },
     };
-    try {
-      const savedArticle = await this.articlesRepository.save(articleData);
-      const article = await this.articlesRepository
-        .createQueryBuilder('article')
-        .where({ slug: savedArticle.slug })
-        .leftJoinAndSelect('article.favoritedBy', 'favorites')
-        .leftJoinAndSelect('article.author', 'author')
-        .addSelect('0', 'article_favoritesCount')
-        .addSelect(`0`, 'article_favoritedTinyIntBool')
-        .leftJoinAndSelect('article.tags', 'tags')
-        .getOne();
-      const authorProfile = await this.profileService.getProfileById(
-        currentUserId,
-        article.author.id,
-      );
-      return {
-        article: this.mapArticleEntityAndProfileToResponseObject(
-          article,
-          authorProfile.profile,
-        ),
-      };
-    } catch (e) {
-      console.log(e);
-      throw new BadRequestException({ error: '' });
-    }
+    const savedArticle = await this.articlesRepository.save(articleData);
+    const tags = await this.tagsRepository.save(
+      createArticleDto.tagList.map((tag) => {
+        return { title: tag };
+      }),
+    );
+    await this.articlesRepository.save([{ id: savedArticle.id, tags: tags }]);
+    const article = await this.articlesRepository
+      .createQueryBuilder('article')
+      .where({ slug: savedArticle.slug })
+      .leftJoinAndSelect('article.favoritedBy', 'favorites')
+      .leftJoinAndSelect('article.author', 'author')
+      .addSelect('0', 'article_favoritesCount')
+      .addSelect('0', 'article_favoritedTinyIntBool')
+      .leftJoinAndSelect('article.tags', 'tags')
+      .getOne();
+    const authorProfile = await this.profileService.getProfileById(
+      currentUserId,
+      article.author.id,
+    );
+    return {
+      article: this.mapArticleEntityAndProfileToResponseObject(
+        article,
+        authorProfile.profile,
+      ),
+    };
   }
   async getArticle(
     slug: string,
@@ -103,7 +103,7 @@ export class ArticleService {
       )
       .groupBy('article.id, tags.id')
       .setParameters({ currentUserId })
-      .getOne();
+      .getOneOrFail();
 
     const authorProfile = await this.profileService.getProfileById(
       currentUserId,
@@ -127,13 +127,10 @@ export class ArticleService {
       .createQueryBuilder('article')
       .leftJoin('article.favoritedBy', 'favorites')
       .leftJoin('article.author', 'author')
-      .leftJoin('article.tags', 'tags')
-      .addSelect(['tags.title', 'author.id'])
+      .addSelect('author.id')
       .addSelect('COUNT(DISTINCT favorites.user_id)', 'article_favoritesCount')
-      .groupBy('article.id, tags.id')
-      .orderBy('article.createdAt', 'DESC')
-      .offset(getArticlesQueryDto.offset)
-      .take(getArticlesQueryDto.limit);
+      .groupBy('article.id')
+      .orderBy('article.createdAt', 'DESC');
 
     if (getArticlesQueryDto.author) {
       qb = qb.andWhere('author.username = :author', {
@@ -165,7 +162,17 @@ export class ArticleService {
         { tag: getArticlesQueryDto.tag },
       );
     }
-    const articles = await qb.getMany();
+    const queryResult = await qb.getMany();
+    const articles = queryResult.slice(
+      getArticlesQueryDto.offset,
+      getArticlesQueryDto.offset + getArticlesQueryDto.limit,
+    );
+    if (articles.length == 0) {
+      return {
+        articles: [],
+        articlesCount: 0,
+      };
+    }
     const articleIds = [...new Set(articles.map((article) => article.id))];
     const articlesWithTags = await this.articlesRepository
       .createQueryBuilder('article')
@@ -208,11 +215,19 @@ export class ArticleService {
         { currentUserId },
       )
       .groupBy('article.id')
-      .orderBy('article.createdAt', 'DESC')
-      .skip(getFeedQueryDto.offset)
-      .take(getFeedQueryDto.limit);
+      .orderBy('article.createdAt', 'DESC');
+    const queryResult = await qb.getMany();
+    const articles = queryResult.slice(
+      getFeedQueryDto.offset,
+      getFeedQueryDto.offset + getFeedQueryDto.limit,
+    );
 
-    const articles = await qb.getMany();
+    if (articles.length == 0) {
+      return {
+        articles: [],
+        articlesCount: 0,
+      };
+    }
     const articleIds = [...new Set(articles.map((article) => article.id))];
     const articlesWithTags = await this.articlesRepository
       .createQueryBuilder('article')
@@ -245,10 +260,16 @@ export class ArticleService {
     updateArticleDto: UpdateArticleDto,
     currentUserId: number,
   ): Promise<ArticleResponse> {
-    const article = await this.articlesRepository.findOneByOrFail({
-      slug,
-      author: { id: currentUserId },
-    });
+    const article = await this.articlesRepository
+      .createQueryBuilder('article')
+      .leftJoin('article.author', 'author')
+      .addSelect('author.id')
+      .where('article.slug = :slug', { slug })
+      .getOneOrFail();
+
+    if (article.author.id != currentUserId) {
+      throw new UnauthorizedException('User is unauthorized');
+    }
     let updateArticleData: DeepPartial<ArticleEntity> = {
       id: article.id,
       updatedAt: new Date(),
@@ -257,6 +278,7 @@ export class ArticleService {
     if (updateArticleDto.title) {
       const newSlug = this.generateSlug(updateArticleDto.title);
       updateArticleData = {
+        ...updateArticleData,
         slug: newSlug,
         title: updateArticleDto.title,
       };
@@ -268,16 +290,19 @@ export class ArticleService {
     );
   }
   async deleteArticle(slug: string, currentUserId: number): Promise<void> {
-    const deleteResult = await this.articlesRepository.delete({
-      slug,
-      author: { id: currentUserId },
-    });
-    if (!deleteResult.affected) {
-      throw new UnauthorizedException(
-        'Article delete by unauthorized user, or comment already deleted',
-      );
+    const article = await this.articlesRepository
+      .createQueryBuilder('article')
+      .leftJoin('article.author', 'author')
+      .addSelect('author.id')
+      .where('article.slug = :slug', { slug: slug })
+      .getOne();
+    if (!article) {
+      throw new EntityNotFoundError(ArticleEntity, 'slug');
     }
-    return;
+    if (article.author.id != currentUserId) {
+      throw new UnauthorizedException('Article delete by unauthorized user');
+    }
+    await this.articlesRepository.delete({ id: article.id });
   }
   async addComment(
     slug: string,
@@ -311,6 +336,7 @@ export class ArticleService {
     slug: string,
     currentUserId: number,
   ): Promise<CommentsResponse> {
+    await this.articlesRepository.findOneOrFail({ where: { slug: slug } });
     const comments = await this.commentsRepository
       .createQueryBuilder('comment')
       .leftJoin('comment.author', 'author')
@@ -336,19 +362,28 @@ export class ArticleService {
     };
   }
   async deleteComment(
-    // slug: string,
+    slug: string,
     commentId: number,
     currentUserId: number,
   ): Promise<void> {
-    const deleteResult = await this.commentsRepository.delete({
-      id: commentId,
-      author: { id: currentUserId },
+    await this.articlesRepository.findOneByOrFail({
+      slug: slug,
     });
-    if (!deleteResult.affected) {
-      throw new UnauthorizedException(
-        'Comment delete by unauthorized user, or comment already deleted',
-      );
+    const comment = await this.commentsRepository
+      .createQueryBuilder('comment')
+      .leftJoin('comment.author', 'author')
+      .addSelect('author.id')
+      .where('comment.id = :commentId', { commentId: commentId })
+      .getOne();
+    if (!comment) {
+      throw new EntityNotFoundError(CommentEntity, 'id');
     }
+    if (comment.author.id != currentUserId) {
+      throw new UnauthorizedException('Comment delete by unauthorized user');
+    }
+    await this.commentsRepository.delete({
+      id: commentId,
+    });
     return;
   }
   async favoriteArticle(
