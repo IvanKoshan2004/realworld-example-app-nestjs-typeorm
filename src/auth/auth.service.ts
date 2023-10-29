@@ -39,7 +39,6 @@ export class AuthService {
       const user = await this.usersRepository.save(userData);
       return user;
     } catch (e) {
-      console.log(e);
       throw new BadRequestException({
         error: 'This username or email, already exists',
       });

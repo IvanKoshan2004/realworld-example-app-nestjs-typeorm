@@ -40,7 +40,7 @@ export class ArticleController {
   ): Promise<ArticleResponse> {
     return this.articleService.createArticle(createArticleDto, user.id);
   }
-  // To DO
+
   @Get()
   @UseGuards(ExtractUserGuard)
   getArticles(
@@ -112,11 +112,11 @@ export class ArticleController {
   @Delete('/:slug/comments/:id')
   @UseGuards(AuthGuard)
   deleteComment(
-    // @Param('slug') slug: string,
+    @Param('slug') slug: string,
     @Param('id') commentId: number,
     @CurrentUser() user: UserJwt,
   ): Promise<void> {
-    return this.articleService.deleteComment(commentId, user.id);
+    return this.articleService.deleteComment(slug, commentId, user.id);
   }
 
   @Post('/:slug/favorite')
